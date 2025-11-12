@@ -81,6 +81,16 @@ change10to16()
     echo $(change_1digit $ten_1jou)$(change_1digit $ten_0jou) #1乗と0乗の値を16進数に変換し、連続で表示する
 }
 
+#i2cgetででてくる0x○○（小文字）を●●：◯◯（アドレス：大文字）に整形する
+ori_i2cget()
+{
+    local par=$1 #関数に入った引数を定義
+    local bef_result=$(i2cget -y 1 0x50 0x$par) #i2cgetの結果を変数として定義する
+    local cut_result=${bef_result:2:2} #0xを取り除くため、2丁目から文字を出力
+    local big_result=$(echo $cut_result | tr [a-z] [A-Z]) #大文字に変換する
+    echo "$par:$big_result" #引数（アドレス）と整形したデータを：でつないで表示する。
+}
+
 #指定したアドレスに至るまで、すべてのデータを表示する
 alladdress()
 {
@@ -88,9 +98,10 @@ alladdress()
     local cnt_address=0
     while [ $cnt_address -le $(change16to10 $fin_address) ] #指定したアドレスを10進数に変えて挿入
     do
-        i2cget -y 1 0x50 0x$(change10to16 $cnt_address) #カウントアドレスを16進数に戻してi2cgetに挿入
+        ori_i2cget $(change10to16 $cnt_address) #カウントアドレスを16進数に戻してi2cgetに挿入
         cnt_address=`expr $cnt_address + 1` #カウントアップ
     done
+    echo "END"
 }
 
 
@@ -112,4 +123,4 @@ elif ! [[ "$par" =~ $permit_charsize ]]; then
     exit 4
 fi
 
-i2cget -y 1 0x50 0x$par
+ori_i2cget $par
