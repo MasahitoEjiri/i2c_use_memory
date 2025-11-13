@@ -85,10 +85,44 @@ change10to16()
 ori_i2cget()
 {
     local par=$1 #関数に入った引数を定義
+    local option=$2
     local bef_result=$(i2cget -y 1 0x50 0x$par) #i2cgetの結果を変数として定義する
     local cut_result=${bef_result:2:2} #0xを取り除くため、2丁目から文字を出力
     local big_result=$(echo $cut_result | tr [a-z] [A-Z]) #大文字に変換する
-    echo "$par:$big_result" #引数（アドレス）と整形したデータを：でつないで表示する。
+
+    case "$option" in
+        "adplus") echo "$par:$big_result" #引数（アドレス）と整形したデータを：でつないで表示する。
+        ;;
+        *) echo "$big_result"
+        ;;
+    esac
+}
+
+#引数に入れたリストに、コンマを入れてcsv形式にする
+list_to_csv()
+{
+    local par=$*
+    local csv=$(echo $par|tr ' ' ',')
+    echo $csv
+}
+
+#16個i2cgetの結果がたまったら1行分として吐き出し、表形式にする
+cell16_grid()
+{
+    local par=$1 #関数に入った引数を定義（16進数）
+    if [ "$par" = "remain" ]; then #ループを終えた後に残っていたものを吐き出す場合
+        list_to_csv ${cell16_list[*]}
+        unset cell16_list
+        return
+    elif ! [ -v cell16_list ]; then #cell16_listが存在しなかった場合（一番初め）
+        cell16_list=(00)
+    elif [ ${#cell16_list[*]} -eq 17 ]; then #cell16_listの長さが17個になった場合
+        list_to_csv ${cell16_list[*]} #リストをcsvに変えてecho
+        now_add_to10=$(change16to10 ${cell16_list[0]}) #今のリストの先頭を10進数にして変数に格納
+        next_add=$(change10to16 $((now_add_to10 + 16 ))) #16足して、16進数に戻す
+        cell16_list=($next_add) #cell16_listを更新し、先頭のアドレスを一つ先にする
+    fi
+    cell16_list+=($(ori_i2cget $par)) #リストの一番右にi2cgetの結果を追加する
 }
 
 #指定したアドレスに至るまで、すべてのデータを表示する
@@ -98,9 +132,10 @@ alladdress()
     local cnt_address=0
     while [ $cnt_address -le $(change16to10 $fin_address) ] #指定したアドレスを10進数に変えて挿入
     do
-        ori_i2cget $(change10to16 $cnt_address) #カウントアドレスを16進数に戻してi2cgetに挿入
+        cell16_grid $(change10to16 $cnt_address) #カウントアドレスを16進数に戻してi2cgetに挿入
         cnt_address=`expr $cnt_address + 1` #カウントアップ
     done
+    cell16_grid remain
     echo "END"
 }
 
@@ -123,4 +158,4 @@ elif ! [[ "$par" =~ $permit_charsize ]]; then
     exit 4
 fi
 
-ori_i2cget $par
+ori_i2cget $par adplus
