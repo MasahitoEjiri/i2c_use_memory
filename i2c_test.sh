@@ -6,7 +6,8 @@ arg_amount=$# #引数の個数
 digit_limit="^.{2}$" #桁数
 permit_char="^[a-fA-F0-9]*$" #16進数範囲内の文字
 permit_charsize="^[A-F0-9]*$" #小文字を除く
-i2cline=1
+permit_csv="[cC][sS][vV]$" #csvファイル指定(.も判定したいけど保留)
+i2cline=0
 memory="0x50"
 
 #引数に応じたエラーメッセージ表示
@@ -16,11 +17,16 @@ error()
     $script_tytle [par]
         par : 00 ～ FF
 ---------------------------------"
+    local helpmessage_write="---------------------------------
+    $script_tytle [file.csv]
+---------------------------------"
     local message_arg="There are two or more arguments."
     local message_char="This character cannot be used in hexadecimal."
     local message_digit="The number of digits is too few or too many."
     local message_charsize="Small charecters cannot be used. "
-
+    local message_nonepar="Please enter the filename."
+    local message_notcsv="Only CSV files can be used."
+    local message_notexist="The file was not found."
     if [ $1 = "arg" ]; then
         echo "$message_arg"
         echo "$helpmessage"
@@ -33,6 +39,18 @@ error()
     elif [ $1 = "charsize" ]; then
         echo "$message_charsize"
         echo "$helpmessage"
+    elif [ $1 = "nonepar" ]; then
+        echo "$message_nonepar"
+        echo "$helpmessage_write"
+    elif [ $1 = "argwrite" ]; then
+        echo "$message_arg"
+        echo "$helpmessage_write"
+    elif [ $1 = "notcsv" ]; then
+        echo "$message_notcsv"
+        echo "$helpmessage_write"
+    elif [ $1 = "notexist" ]; then
+        echo "$message_notexist"
+        echo "$helpmessage_write"
     fi
 }
 
@@ -162,23 +180,88 @@ alladdress()
     echo "END"
 }
 
+#外部のcsvファイルを読み込んで、メモリに書き込む
+csv_import()
+{
+    CSV_FILE=$1 #関数の引数として与えられたcsvファイルを取得
+    last_char=$(tail -c 1 $CSV_FILE) #ファイルの末尾の一文字を取得
+    if [ "$last_char" != "" ]; then #末尾が空白（改行）ではない場合
+        echo "" >> $CSV_FILE #空白行を挿入
+    fi
 
-#メインループ
-if [ $arg_amount -eq 0 ]; then
-    alladdress
-    exit
-elif [ $arg_amount -gt 1 ]; then
-    error arg
-    exit 1
-elif ! [[ "$par" =~ $permit_char ]]; then
-    error char
-    exit 2
-elif ! [[ "$par" =~ $digit_limit ]]; then
-    error digit
-    exit 3
-elif ! [[ "$par" =~ $permit_charsize ]]; then
-    error charsize
-    exit 4
-fi
+    #リダイレクトされたcsvファイルを1行ずつreadする
+    while read LINE
+    do
+        echo "--------"
+        csvlist=() #空のリストを用意
+        adr=$(echo $LINE | cut -d "," -f 1) #コンマで区切って、先頭をアドレスとして取得
+        adr10=$((16#$adr)) #アドレスを10進数に直す
+        for i in {0..15}
+        do
+            csvlist[$i]=$(echo $LINE | cut -d "," -f $((i + 2))) #リストにcsvファイルの値を順番通り格納
+            i2cset -y $i2cline "$memory" "0x$(printf "%X" $adr10)" "0x${csvlist[$i]}" #アドレスを16進数に直し、リストの値とともにi2csetへ挿入。
+            adr10=$((adr10 + 1)) #アドレスをカウントアップ
 
-ori_i2cget $par adplus
+        done
+        echo "$adr:${csvlist[*]}" #書き込みが完了した列を表示
+    done < $CSV_FILE #csvファイルをdo文へリダイレクト
+}
+
+
+
+
+#メインループver1（read機能だけ。引数はなしか、一つだけアドレスを指定する。）
+main_readonly()
+{
+    if [ $arg_amount -eq 0 ]; then
+        alladdress
+        exit
+    elif [ $arg_amount -gt 1 ]; then
+        error arg
+        exit 1
+    elif ! [[ "$par" =~ $permit_char ]]; then
+        error char
+        exit 2
+    elif ! [[ "$par" =~ $digit_limit ]]; then
+        error digit
+        exit 3
+    elif ! [[ "$par" =~ $permit_charsize ]]; then
+        error charsize
+        exit 4
+    fi
+
+    ori_i2cget $par adplus
+}
+
+#メインループver2
+main_writeonly()
+{
+    if [ $arg_amount -eq 0 ]; then #引数（指定ファイル）が無い場合
+        error nonepar
+        exit 5
+    elif [ $arg_amount -gt 1 ]; then #引数が1より多い場合
+        error argwrite
+        exit 1
+    elif ! [[ "$par" =~ $permit_csv ]]; then #拡張子がcsvではない場合
+        error notcsv
+        exit 6
+    elif ! [ -e "$par" ]; then #指定ファイルが存在しない場合
+        error notexist
+        exit 7
+    fi
+
+    csv_import $par
+}
+
+#テスト用メインループ切替
+Thistimeroop=2 #今回のバージョン指定
+
+case $Thistimeroop in
+    1) main_readonly
+    ;;
+    2) main_writeonly
+    ;;
+    *) zzzzzzzz="zzzzzzzzzzzzzz"
+    ;;
+esac 
+
