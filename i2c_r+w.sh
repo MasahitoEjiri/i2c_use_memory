@@ -4,101 +4,104 @@ script_tytle=$0 #スクリプト名
 par=$1 #引数
 par2=$2 #引数
 arg_amount=$# #引数の個数
-digit_limit="^.{2}$" #桁数
-permit_usechar="^[a-fA-F0-9]*$" #16進数範囲内の文字
-permit_sizechar="^[A-F0-9]*$" #小文字を除く
-permit_csv="[cC][sS][vV]$" #csvファイル指定(.も判定したいけど保留)
+
+#メモリの位置情報
 i2cline=0
 memory="0x50"
 
+
+
 #help--------------------------------------------------------------------------------------------
+#ヘルプ番号割り当て
+normal_help=1
+read_help=2
+write_help=3
+
+#ヘルプメッセージ内容
 helpmessage="---------------------------------------------------
-    $script_tytle [mode] [par]
+$script_tytle [mode] [par]
         mode: -r (You can read the data in memory.)
-                par: 00 ～ FF
-                     none(alladdress)
-              -w (You can import CSV files.)
-                par: yourfile.csv
+            par: 00 ～ FF
+                 none(alladdress)
+        mode: -w (You can import CSV files.)
+            par: yourfile.csv
 ---------------------------------------------------"
-
-#ヘルプメッセージを表示する
-help_message()
-{
-    echo "$helpmessage"
-}
-
-
-#error--------------------------------------------------------------------------------------------
-#引数の個数が2つより多いときに表示するエラー
-arg_error()
-{
-    local message_nonearg="Please enter some parameters."
-    local message_mucharg="There are three or more arguments."
-
-    if [ $1 = "nonearg" ]; then #関数の引数がnoneparの場合
-        echo "$message_nonearg"
-    elif [ $1 = "mucharg" ]; then #関数の引数がnotcsvの場合
-        echo "$message_mucharg"
-    fi
-
-    echo "$helpmessage"
-}
-
-#readモードにおいて、パラメータが規定値と異なる際に表示するエラー
-read_error_par()
-{
-    local message_usechar="This character cannot be used in hexadecimal."
-    local message_digit="The number of digits is too few or too many."
-    local message_sizechar="Small charecters cannot be used. "
-    local read_helpmessage="------------------------------------------
+read_helpmessage="------------------------------------------
     $script_tytle -r [par]
         par: 00 ～ FF
              none(alladdress)
 ------------------------------------------"
-
-    if [ $1 = "digit" ]; then #関数の引数がdigitの場合
-        echo "$message_digit"
-    elif [ $1 = "usechar" ]; then #関数の引数がusecharの場合
-        echo "$message_usechar"
-    elif [ $1 = "sizechar" ]; then #関数の引数がsizecharの場合
-        echo "$message_sizechar"
-    fi
-
-    echo "$read_helpmessage"
-    
-}
-
-#writeモードにおいて、パラメータが規定値と異なる際に表示するエラー
-write_error_par()
-{
-    local message_nonepar="Please enter the filename."
-    local message_notcsv="Only CSV files can be used."
-    local message_notexist="The file was not found."
-    local write_helpmessage="-------------------------------------
+write_helpmessage="-------------------------------------
     $script_tytle -w [par]
         par: yourfile.csv
 -------------------------------------"
 
-    if [ $1 = "nonepar" ]; then #関数の引数がnoneparの場合
-        echo "$message_nonepar"
-    elif [ $1 = "notcsv" ]; then #関数の引数がnotcsvの場合
-        echo "$message_notcsv"
-    elif [ $1 = "notexist" ]; then #関数の引数がnotexistの場合
-        echo "$message_notexist"
-    fi
 
-    echo "$write_helpmessage"
-}
-
-#モードを指定するパラメータが規定値と異なる際に表示するエラー
-mode_error_par()
+#第1引数として受け取ったヘルプ番号とヘルプメッセージを対応させて表示する。
+help_message()
 {
-
-    echo "That mode does not exist."
-    echo "$helpmessage"
-
+    case $1 in
+    $normal_help) echo "$helpmessage"
+    ;;
+    $read_help) echo "$read_helpmessage"
+    ;;
+    $write_help) echo "$write_helpmessage"
+    ;;
+    esac
 }
 
+
+#error--------------------------------------------------------------------------------------------
+#エラー番号の割り当て
+arg_none=1
+arg_over=2
+mode_wrong=3
+read_digit=4
+read_usechar=5
+read_charsize=6
+write_nonepar=7
+write_notcsv=8
+write_notexist=9
+
+#エラーメッセージ内容
+arg_none_mes="Please enter some parameters."
+arg_over_mes="There are three or more arguments."
+mode_wrong_mes="That mode does not exist."
+read_digit_mes="The number of digits is too few or too many."
+read_usechar_mes="This character cannot be used in hexadecimal."
+read_charsize_mes="Small charecters cannot be used. "
+write_nonepar_mes="Please enter the filename."
+write_notcsv_mes="Only CSV files can be used."
+write_notexist_mes="The file was not found."
+
+#第1引数として受け取ったエラー番号とメッセージを対応させて表示し、第2引数として受け取ったヘルプ番号をhelp関数に渡して終了
+error_par()
+{
+    case $1 in
+
+    $arg_none) echo "$arg_none_mes"
+    ;;
+    $arg_over) echo "$arg_over_mes"
+    ;;
+    $mode_wrong) echo "$mode_wrong_mes"
+    ;;
+    $read_digit) echo "$read_digit_mes"
+    ;;
+    $read_usechar) echo "$read_usechar_mes"
+    ;;
+    $read_charsize) echo "$read_charsize_mes"
+    ;;
+    $write_nonepar) echo "$write_nonepar_mes"
+    ;;
+    $write_notcsv) echo "$write_notcsv_mes"
+    ;;
+    $write_notexist) echo "$write_notexist_mes"
+    ;;
+    esac
+
+    help_message $2
+    exit 1
+}
 
 
 #read_function--------------------------------------------------------------------------------------------
@@ -186,6 +189,12 @@ write_fromcsv()
 
 
 #par_insert--------------------------------------------------------------------------------------------
+#規定外のパラメータをはじくための正規表現格納
+digit_limit="^.{2}$" #桁数
+permit_usechar="^[a-fA-F0-9]*$" #16進数範囲内の文字
+permit_sizechar="^[A-F0-9]*$" #小文字を除く
+permit_csv="[cC][sS][vV]$" #csvファイル指定(.も判定したいけど保留)
+
 #readモードにおいて、ユーザーが入力したパラメータをスクリプトに読み込ませる
 read_insert_par()
 {
@@ -195,14 +204,11 @@ read_insert_par()
         read_alladr
         exit
     elif ! [[ "$par_adr" =~ $digit_limit ]]; then #引数の桁が2桁でない場合
-        read_error_par digit
-        exit 1
+        error_par $read_digit $read_help
     elif ! [[ "$par_adr" =~ $permit_usechar ]]; then #引数が16進数で使えない文字だった場合
-        read_error_par usechar
-        exit 2
+        error_par $read_usechar $read_help
     elif ! [[ "$par_adr" =~ $permit_sizechar ]]; then #引数のアルファベットが大文字ではない場合
-        read_error_par sizechar
-        exit 3
+        error_par $read_charsize $read_help
     else
         zzzzzzzz="zzzzzzzzzzzzzzz" #なにもしない
     fi
@@ -216,14 +222,11 @@ write_insert_par()
     local par_file=$1
 
     if ! [ -n "$par_file" ]; then #引数が0文字の場合
-        write_error_par nonepar
-        exit 4
+        error_par $write_nonepar $write_help
     elif ! [[ "$par_file" =~ $permit_csv ]]; then #拡張子がcsvではない場合
-        write_error_par notcsv
-        exit 5
+        error_par $write_notcsv $write_help
     elif ! [ -e "$par_file" ]; then #指定ファイルが存在しない場合
-        write_error_par notexist
-        exit 6
+        error_par $write_notexist $write_help
     else
         zzzzzzzz="zzzzzzzzzzzzzzz" #なにもしない
     fi
@@ -232,14 +235,13 @@ write_insert_par()
 
 }
 
+
 #mainroop--------------------------------------------------------------------------------------------
 #メインループ。引数の個数エラーをはじいた後、モードを切り替える。
 if [ $arg_amount -eq 0 ]; then #引数が無い場合
-    arg_error nonearg
-    exit 7
+    error_par $arg_none $normal_help
 elif [ $arg_amount -gt 2 ]; then #引数が2よりも多い場合
-    arg_error mucharg
-    exit 8
+    error_par $arg_over $normal_help
 fi
 
 case "$par" in
@@ -247,9 +249,8 @@ case "$par" in
 ;;
 "-w") write_insert_par $par2
 ;;
-"-h") help_message
+"-h") help_message $normal_help
 ;;
-*) mode_error_par notexist
-    exit 9
+*) error_par $mode_wrong $normal_help
 ;;
 esac
