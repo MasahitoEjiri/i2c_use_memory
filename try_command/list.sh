@@ -26,6 +26,7 @@ echo $((cell16_list[2]))
 next_add=0$((cell16_list[2] + 1))
 echo $next_add
 unset cell16_list
+cell16_list=
 echo ${cell16_list[*]}
 if [ -v cell16_list ]; then
     echo "hallo"

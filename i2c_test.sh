@@ -2,6 +2,7 @@
 
 script_tytle=$0 #スクリプト名
 par=$1 #引数
+par2=$2 #引数
 arg_amount=$# #引数の個数
 digit_limit="^.{2}$" #桁数
 permit_usechar="^[a-fA-F0-9]*$" #16進数範囲内の文字
@@ -10,21 +11,47 @@ permit_csv="[cC][sS][vV]$" #csvファイル指定(.も判定したいけど保�
 i2cline=0
 memory="0x50"
 
+helpmessage="---------------------------------------------------
+    $script_tytle [mode] [par]
+        mode: -r (You can read the data in memory.)
+                par: 00 ～ FF
+                     none(alladdress)
+              -w (You can import CSV files.)
+                par: yourfile.csv
+---------------------------------------------------"
 
-arg_error()
+#ヘルプメッセージを表示する
+help_message()
 {
-    echo "There are two or more arguments."
+    echo "$helpmessage"
 }
 
+#引数の個数が2つより多いときに表示するエラー
+arg_error()
+{
+    local message_nonearg="Please enter some parameters."
+    local message_mucharg="There are three or more arguments."
+
+    if [ $1 = "nonearg" ]; then #関数の引数がnoneparの場合
+        echo "$message_nonearg"
+    elif [ $1 = "mucharg" ]; then #関数の引数がnotcsvの場合
+        echo "$message_mucharg"
+    fi
+
+    echo "$helpmessage"
+}
+
+#readモードにおいて、パラメータが規定値と異なる際に表示するエラー
 read_error_par()
 {
     local message_usechar="This character cannot be used in hexadecimal."
     local message_digit="The number of digits is too few or too many."
     local message_sizechar="Small charecters cannot be used. "
-    local helpmessage="---------------------------------
-    $script_tytle [par]
-        par : 00 ～ FF
----------------------------------"
+    local read_helpmessage="------------------------------------------
+    $script_tytle -r [par]
+        par: 00 ～ FF
+             none(alladdress)
+------------------------------------------"
 
     if [ $1 = "digit" ]; then #関数の引数がdigitの場合
         echo "$message_digit"
@@ -34,18 +61,20 @@ read_error_par()
         echo "$message_sizechar"
     fi
 
-    echo "$helpmessage"
+    echo "$read_helpmessage"
     
 }
 
+#writeモードにおいて、パラメータが規定値と異なる際に表示するエラー
 write_error_par()
 {
     local message_nonepar="Please enter the filename."
     local message_notcsv="Only CSV files can be used."
     local message_notexist="The file was not found."
-    local helpmessage="---------------------------------
-    $script_tytle [file.csv]
----------------------------------"
+    local write_helpmessage="-------------------------------------
+    $script_tytle -w [par]
+        par: yourfile.csv
+-------------------------------------"
 
     if [ $1 = "nonepar" ]; then #関数の引数がnoneparの場合
         echo "$message_nonepar"
@@ -55,7 +84,16 @@ write_error_par()
         echo "$message_notexist"
     fi
 
+    echo "$write_helpmessage"
+}
+
+#モードを指定するパラメータが規定値と異なる際に表示するエラー
+mode_error_par()
+{
+
+    echo "That mode does not exist."
     echo "$helpmessage"
+
 }
 
 #i2cgetででてくる0x○○（小文字）を●●：◯◯（アドレス：大文字）に整形する
@@ -82,7 +120,7 @@ read_lineadr()
     local par=$1 #関数に与えられた引数を定義（カウントアップ10進数）
     local ofs=$(($par % 16)) #リセット基準とのずれ
     local fin_add="$2" #関数に与えられた引数を定義（指定した最終アドレス）
-    local now_add="$(printf "%X"  $par)" #16進数に変え、アドレスとして使える形にする
+    local now_add="$(printf '%04X'  $par)" #4桁0埋めの16進数に変え、アドレスとして使える形にする
     if [ $ofs -eq 0 ]; then #16の倍数番目の場合、新しく先頭にアドレスを入れる
         cell16_list="$now_add"
     fi
@@ -123,25 +161,25 @@ write_fromcsv()
     #リダイレクトされたcsvファイルを1行ずつreadする
     while read LINE
     do
-        echo "--------"
-        csvlist=() #空のリストを用意
+        line_csv="" #line_csvに残っている前行の結果を消す。
         adr=$(echo $LINE | cut -d "," -f 1) #コンマで区切って、先頭をアドレスとして取得
         adr10=$((16#$adr)) #アドレスを10進数に直す
         for i in {0..15}
         do
-            csvlist[$i]=$(echo $LINE | cut -d "," -f $((i + 2))) #リストにcsvファイルの値を順番通り格納
-            i2cset -y $i2cline "$memory" "0x$(printf "%X" $adr10)" "0x${csvlist[$i]}" #アドレスを16進数に直し、リストの値とともにi2csetへ挿入。
+            one_csv=$(echo $LINE | cut -d "," -f $((i + 2))) #ループで回ってきた順番の値を取得
+            i2cset -y $i2cline "$memory" "0x$(printf "%X" $adr10)" "0x$one_csv" #アドレスを16進数に直し、順番の値とともにi2csetへ挿入。
+            line_csv="$line_csv"",$one_csv" #セットが完了した値からコンマ区切りの行文字列に格納
             adr10=$((adr10 + 1)) #アドレスをカウントアップ
 
         done
-        echo "$adr:${csvlist[*]}" #書き込みが完了した列を表示
+        echo "$(printf "%04X" 0x$adr)$line_csv" #アドレスを0埋めして4桁にし、書き込みが完了した列を表示
     done < $CSV_FILE #csvファイルをdo文へリダイレクト
 }
 
 
 
 
-#メインループver1（read機能だけ。引数はなしか、一つだけアドレスを指定する。）
+#検討段階ver1（read機能だけ。引数はなしか、一つだけアドレスを指定する。ヘルプやエラー表示をver3仕様にしたためにこれでは動かせない。）
 main_readonly()
 {
     if [ $arg_amount -eq 0 ]; then #引数が無い場合
@@ -166,7 +204,7 @@ main_readonly()
     read_oneadr $par adplus
 }
 
-#メインループver2
+#検討段階ver2（write機能だけ。ヘルプやエラー表示をver3仕様にしたためにこれでは動かせない。）
 main_writeonly()
 {
     if [ $arg_amount -gt 1 ]; then #引数が1より多い場合
@@ -188,13 +226,88 @@ main_writeonly()
     write_fromcsv $par
 }
 
+
+#メインループver3
+#readモードにおいて、ユーザーが入力したパラメータをスクリプトに読み込ませる
+read_insert_par()
+{
+    local par_adr=$1
+
+    if ! [ -n "$par_adr" ]; then #引数が0文字の場合
+        read_alladr
+        exit
+    elif ! [[ "$par_adr" =~ $digit_limit ]]; then #引数の桁が2桁でない場合
+        read_error_par digit
+        exit 1
+    elif ! [[ "$par_adr" =~ $permit_usechar ]]; then #引数が16進数で使えない文字だった場合
+        read_error_par usechar
+        exit 2
+    elif ! [[ "$par_adr" =~ $permit_sizechar ]]; then #引数のアルファベットが大文字ではない場合
+        read_error_par sizechar
+        exit 3
+    else
+        zzzzzzzz="zzzzzzzzzzzzzzz" #なにもしない
+    fi
+
+    read_oneadr $par_adr adplus
+}
+
+#writeモードにおいて、ユーザーが入力したパラメータをスクリプトに読み込ませる
+write_insert_par()
+{
+    local par_file=$1
+
+    if ! [ -n "$par_file" ]; then #引数が0文字の場合
+        write_error_par nonepar
+        exit 4
+    elif ! [[ "$par_file" =~ $permit_csv ]]; then #拡張子がcsvではない場合
+        write_error_par notcsv
+        exit 5
+    elif ! [ -e "$par_file" ]; then #指定ファイルが存在しない場合
+        write_error_par notexist
+        exit 6
+    else
+        zzzzzzzz="zzzzzzzzzzzzzzz" #なにもしない
+    fi
+
+    write_fromcsv $par_file
+
+}
+
+#引数の個数エラーをはじいた後、モードを切り替える（ここがメインループ）。
+main_modeswitch()
+{
+    if [ $arg_amount -eq 0 ]; then #引数が無い場合
+        arg_error nonearg
+        exit 7
+    elif [ $arg_amount -gt 2 ]; then #引数が2よりも多い場合
+        arg_error mucharg
+        exit 8
+    fi
+
+    case "$par" in
+    "-r") read_insert_par $par2
+    ;;
+    "-w") write_insert_par $par2
+    ;;
+    "-h") help_message
+    ;;
+    *) mode_error_par notexist
+       exit 9
+    ;;
+    esac
+
+}
+
 #テスト用メインループ切替
-Thistimeroop=2 #今回のバージョン指定
+Thistimeroop=3 #今回のバージョン指定
 
 case $Thistimeroop in
     1) main_readonly
     ;;
     2) main_writeonly
+    ;;
+    3) main_modeswitch
     ;;
     *) zzzzzzzz="zzzzzzzzzzzzzz"
     ;;
