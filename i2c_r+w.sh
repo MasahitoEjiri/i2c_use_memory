@@ -9,6 +9,10 @@ arg_amount=$# #引数の個数
 i2cline=0
 memory="0x50"
 
+#read出力先のファイル名
+file_name="data_output"
+ext=".csv"
+
 
 
 #help--------------------------------------------------------------------------------------------
@@ -16,6 +20,7 @@ memory="0x50"
 normal_help=1
 read_help=2
 write_help=3
+file_help=4
 
 #ヘルプメッセージ内容
 helpmessage="---------------------------------------------------
@@ -24,7 +29,7 @@ $script_tytle [mode] [par]
             par: 00 ～ FF
                  none(alladdress)
         mode: -w (You can import CSV files.)
-            par: yourfile.csv
+            par: XXXXX.csv
 ---------------------------------------------------"
 read_helpmessage="------------------------------------------
     $script_tytle -r [par]
@@ -34,6 +39,10 @@ read_helpmessage="------------------------------------------
 write_helpmessage="-------------------------------------
     $script_tytle -w [par]
         par: yourfile.csv
+-------------------------------------"
+file_helpmessage="-------------------------------------
+    ${file_name}XX${ext}
+        XX: 00 (min) → 99(max)
 -------------------------------------"
 
 
@@ -47,6 +56,8 @@ help_message()
     ;;
     $write_help) echo "$write_helpmessage"
     ;;
+    $file_help) echo "$file_helpmessage"
+    ;;
     esac
 }
 
@@ -55,13 +66,13 @@ help_message()
 #エラー番号の割り当て
 arg_none=1
 arg_over=2
-mode_wrong=3
-read_digit=4
-read_usechar=5
-read_charsize=6
-write_nonepar=7
-write_notcsv=8
-write_notexist=9
+mode_wrong=10
+read_digit=20
+read_usechar=21
+read_charsize=22
+write_nonepar=31
+write_notcsv=32
+write_notexist=33
 
 #エラーメッセージ内容
 arg_none_mes="Please enter some parameters."
@@ -103,6 +114,22 @@ error_par()
     exit 1
 }
 
+read_muchfile=50
+
+read_muchfile_mes="Please remove ${file_name}XX${ext}."
+
+error_file()
+{
+    case $1 in
+    
+    $read_muchfile) echo "$read_muchfile_mes"
+    ;;
+    esac
+
+    help_message $2
+    exit 2
+}
+
 
 #read_function--------------------------------------------------------------------------------------------
 #i2cgetででてくる0x○○（小文字）を●●：◯◯（アドレス：大文字）に整形する
@@ -123,38 +150,50 @@ read_oneadr()
 }
 
 
-#16個i2cgetの結果がたまったら、1行分として表形式で吐き出す
-read_lineadr()
+#追番を若い順から空いているもの見つけ、ファイルを出力する。
+read_make_outputcsv()
 {
-    local par=$1 #関数に与えられた引数を定義（カウントアップ10進数）
-    local ofs=$(($par % 16)) #リセット基準とのずれ
-    local fin_add="$2" #関数に与えられた引数を定義（指定した最終アドレス）
-    local now_add="$(printf '%04X'  $par)" #4桁0埋めの16進数に変え、アドレスとして使える形にする
-    if [ $ofs -eq 0 ]; then #16の倍数番目の場合、新しく先頭にアドレスを入れる
-        cell16_list="$now_add"
-    fi
-
-        cell16_list="$cell16_list"",$(read_oneadr $now_add)" #i2cgetの結果を横に並べる
-
-    if [ $ofs -eq 15 ]; then #15番目が終わった場合吐き出す
-        echo "$cell16_list"
-    elif [ "$now_add" = "$fin_add" ]; then #最終アドレスに至った場合吐き出す
-        echo "$cell16_list"
-    else
-        zzzzzzzz="zzzzzzzzzz" #なにもしない
-    fi
+    for i in $(seq -w 0 99) #0埋め2桁の範囲を指定
+    do
+        if ! [ -e "$file_name${i}$ext" ]; then #若い順から追番がすでにあるか判定し、なければその番号でファイル名作成
+            echo "$file_name${i}$ext"
+            return
+        fi
+    done
 }
 
+
+
 #指定したアドレスに至るまで、すべてのデータを表形式で表示する
+fin_address="FF" #アドレス指定
+READ_RESULT=$(read_make_outputcsv)
 read_alladr()
 {
-    fin_address="FF" #アドレス指定
     local cnt_address=0
+    echo "Wait a minute..."
     while [ $cnt_address -le $((16#$fin_address)) ] #指定したアドレスを10進数に変えて挿入
     do
-        read_lineadr $cnt_address $fin_address #カウントアドレスと最終アドレスを渡す
+
+        local ofs=$(($cnt_address % 16)) #リセット基準とのずれ
+        local now_add="$(printf '%04X'  $cnt_address)" #4桁0埋めの16進数に変え、アドレスとして使える形にする
+        if [ $ofs -eq 0 ]; then #16の倍数番目の場合、新しく先頭にアドレスを入れる
+            lineadr_data="$now_add"
+        fi
+
+            lineadr_data="$lineadr_data"",$(read_oneadr $now_add)" #read_oneadrの結果を横に並べる
+
+        if [ $ofs -eq 15 ]; then #15番目が終わった場合吐き出す
+            echo "$lineadr_data" >> $READ_RESULT
+        elif [ "$now_add" = "$fin_address" ]; then #最終アドレスに至った場合吐き出す
+            echo "$lineadr_data" >> $READ_RESULT
+        else
+            zzzzzzzz="zzzzzzzzzz" #なにもしない
+        fi
+
         cnt_address=`expr $cnt_address + 1` #カウントアップ
     done
+    echo "filename: $READ_RESULT"
+    cat $READ_RESULT
     echo "END"
 }
 
@@ -201,8 +240,12 @@ read_insert_par()
     local par_adr=$1
 
     if ! [ -n "$par_adr" ]; then #引数が0文字の場合
-        read_alladr
-        exit
+        if ! [ -n "$READ_RESULT" ]; then #出力先ファイルが99までいっぱいで作成されなかった場合
+            error_file $read_muchfile $file_help
+        else
+            read_alladr
+            exit
+        fi
     elif ! [[ "$par_adr" =~ $digit_limit ]]; then #引数の桁が2桁でない場合
         error_par $read_digit $read_help
     elif ! [[ "$par_adr" =~ $permit_usechar ]]; then #引数が16進数で使えない文字だった場合
